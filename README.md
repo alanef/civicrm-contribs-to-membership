@@ -25,6 +25,7 @@ Replace the database credentials
  ```$hostname_CiviCRM = "localhost";
 $database_CiviCRM = "yourdatabase";
 $username_CiviCRM = "youruser";
-$password_CiviCRM = "yourpassword";```
+$password_CiviCRM = "yourpassword";
+```
 
 *The code shouldn't be placed in a web accessible area as it contains database credentials*
