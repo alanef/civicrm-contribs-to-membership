@@ -150,7 +150,7 @@ AND (YEAR(start_date) = YEAR(%s) OR YEAR(join_date)=YEAR(%s))", GetSQLValueStrin
             $rsNewMembershipPayment = mysql_query($query_rsNewMembershipPayment, $CiviCRM) or die(mysql_error());
             $row_rsNewMembershipPayment       = mysql_fetch_assoc($rsNewMembershipPayment);
             $totalRows_rsNewMembershipPayment = mysql_num_rows($rsNewMembershipPayment);
-.
+            
             if ($row_rsNewMembershipPayment['id']) {
                 $log->lwrite("Created link for Memb ID  " . $row_rsMembershipPayments['MembershipID']);
             } else {
