@@ -27,22 +27,25 @@ The code shouldn't be placed in a web accessible area as it contains database cr
 
 $log = new Logging();
 $log->lwrite("starting");
+
 $hostname_CiviCRM = "localhost";
 $database_CiviCRM = "yourdatabase";
 $username_CiviCRM = "youruser";
 $password_CiviCRM = "yourpassword";
-$CiviCRM = mysql_pconnect($hostname_CiviCRM, $username_CiviCRM, $password_CiviCRM) or trigger_error(mysql_error(), E_USER_ERROR);
+
+
+$CiviCRM = mysqli_connect("p:".$hostname_CiviCRM, $username_CiviCRM, $password_CiviCRM, $database_CiviCRM) or trigger_error(mysqli_connect_error());
 
 
 // Really not sure what this is about but it works ( or seems to)
 if (!function_exists("GetSQLValueString")) {
-    function GetSQLValueString($theValue, $theType, $theDefinedValue = "", $theNotDefinedValue = "")
+    function GetSQLValueString($conn, $theValue, $theType, $theDefinedValue = "", $theNotDefinedValue = "")
     {
         if (PHP_VERSION < 6) {
             $theValue = get_magic_quotes_gpc() ? stripslashes($theValue) : $theValue;
         }
 
-        $theValue = function_exists("mysql_real_escape_string") ? mysql_real_escape_string($theValue) : mysql_escape_string($theValue);
+        $theValue = function_exists("mysqli_real_escape_string") ? mysqli_real_escape_string($conn, $theValue) : mysqli_escape_string($conn, $theValue);
 
         switch ($theType) {
             case "text":
@@ -66,7 +69,6 @@ if (!function_exists("GetSQLValueString")) {
     }
 }
 
-mysql_select_db($database_CiviCRM, $CiviCRM);
 
 // this query handles renewing grace memberships
 $query_renewGraceMemberships = "UPDATE civicrm_membership AS m
@@ -76,7 +78,7 @@ inner join civicrm_contribution cn on c.id = cn.contact_id AND YEAR(cn.receive_d
 SET m.end_date = DATE_ADD(DATE_SUB(CURDATE(), INTERVAL DAYOFYEAR(CURDATE()) DAY), INTERVAL 1 YEAR),
 m.status_id = 2";
 
-$rsrenewGraceMemberships = mysql_query($query_renewGraceMemberships, $CiviCRM) or die(mysql_error());
+$rsrenewGraceMemberships = mysqli_query($CiviCRM, $query_renewGraceMemberships) or die(mysqli_error($CiviCRM));
 $log->lwrite("Grace Membership ".print_r($rsrenewGraceMemberships,true));
 
 
@@ -85,9 +87,9 @@ $query_rsMembershipPayments = "SELECT civicrm_contribution.id AS ContributionID,
 civicrm_contribution.financial_type_id, civicrm_contribution.receive_date, civicrm_contribution.total_amount, civicrm_contribution.trxn_id,
 civicrm_contribution.source AS ContributionSource, civicrm_contribution.contribution_status_id, civicrm_membership.id AS MembershipID,
 civicrm_membership.contact_id AS MembershipContactID, civicrm_membership.membership_type_id, civicrm_membership.join_date, civicrm_membership.start_date, civicrm_membership_payment.id AS MembershipPaymentID, civicrm_membership_payment.membership_id, civicrm_membership_payment.contribution_id FROM civicrm_membership right join (civicrm_membership_payment right join civicrm_contribution on civicrm_membership_payment.contribution_id = civicrm_contribution.id) on civicrm_membership.id = civicrm_membership_payment.membership_id";
-$rsMembershipPayments = mysql_query($query_rsMembershipPayments, $CiviCRM) or die(mysql_error());
-$row_rsMembershipPayments       = mysql_fetch_assoc($rsMembershipPayments);
-$totalRows_rsMembershipPayments = mysql_num_rows($rsMembershipPayments);
+$rsMembershipPayments = mysqli_query($CiviCRM, $query_rsMembershipPayments) or die(mysqli_error($CiviCRM));
+$row_rsMembershipPayments       = mysqli_fetch_assoc($rsMembershipPayments);
+$totalRows_rsMembershipPayments = mysqli_num_rows($rsMembershipPayments);
 
 do {
     // look to see if MembershipContactID is null
@@ -112,18 +114,20 @@ do {
         if (isset($row_rsMembershipPayments['receive_date'])) {
             $joindate_rsMembershipCandidate = substr($row_rsMembershipPayments['receive_date'], 0, 10);
         }
-        mysql_select_db($database_CiviCRM, $CiviCRM);
-        $query_rsMembershipCandidate = sprintf("SELECT id, contact_id, membership_type_id, join_date, start_date
-   FROM civicrm_membership WHERE contact_id= %s
-AND (YEAR(start_date) = YEAR(%s) OR YEAR(join_date)=YEAR(%s))", GetSQLValueString($contactID_rsMembershipCandidate, "int"), GetSQLValueString($startdate_rsMembershipCandidate, "date"), GetSQLValueString($joindate_rsMembershipCandidate, "date"));
-        $rsMembershipCandidate = mysql_query($query_rsMembershipCandidate, $CiviCRM) or die(mysql_error());
-        $row_rsMembershipCandidate       = mysql_fetch_assoc($rsMembershipCandidate);
-        $totalRows_rsMembershipCandidate = mysql_num_rows($rsMembershipCandidate);
+
+        $query_rsMembershipCandidate = sprintf("SELECT m.id, contact_id, membership_type_id, join_date, start_date
+   FROM civicrm_membership m, civicrm_membership_status ms WHERE contact_id= %s
+   AND  m.status_id = ms.id
+   AND ms.is_current_member = 1
+AND (YEAR(start_date) = YEAR(%s) OR YEAR(join_date)=YEAR(%s))", GetSQLValueString($CiviCRM, $contactID_rsMembershipCandidate, "int"), GetSQLValueString($CiviCRM,$startdate_rsMembershipCandidate, "date"), GetSQLValueString($CiviCRM,$joindate_rsMembershipCandidate, "date"));
+        $rsMembershipCandidate = mysqli_query($CiviCRM, $query_rsMembershipCandidate) or die(mysqli_error($CiviCRM));
+        $row_rsMembershipCandidate       = mysqli_fetch_assoc($rsMembershipCandidate);
+        $totalRows_rsMembershipCandidate = mysqli_num_rows($rsMembershipCandidate);
 
         if ($totalRows_rsMembershipCandidate > 1) {
 
             // if it finds more than one record, put up a note, and don't create anything.
-            $log->lwrite("More than one record nothing to do for mem ID  " . $row_rsMembershipPayments['MembershipID']);
+            $log->lwrite("More than one record nothing to do for contact ID  " . $contactID_rsMembershipCandidate );
 
         } elseif (!$row_rsMembershipCandidate['id']) {
     //        $log->lwrite("Nothing to do here , no member found ");
@@ -132,10 +136,9 @@ AND (YEAR(start_date) = YEAR(%s) OR YEAR(join_date)=YEAR(%s))", GetSQLValueStrin
 
             // if it finds a single record, create a link in civicrm_membership_payments that ties together the membership_id and contribution_id
 
-            $insertSQL = sprintf("INSERT INTO civicrm_membership_payment (membership_id, contribution_id) VALUES (%s, %s)", GetSQLValueString($row_rsMembershipCandidate['id'], "int"), GetSQLValueString($row_rsMembershipPayments['ContributionID'], "int"));
+            $insertSQL = sprintf("INSERT INTO civicrm_membership_payment (membership_id, contribution_id) VALUES (%s, %s)", GetSQLValueString($CiviCRM,$row_rsMembershipCandidate['id'], "int"), GetSQLValueString($CiviCRM,$row_rsMembershipPayments['ContributionID'], "int"));
 
-            mysql_select_db($database_CiviCRM, $CiviCRM);
-            $Result1 = mysql_query($insertSQL, $CiviCRM) or die(mysql_error());
+            $Result1 = mysqli_query($CiviCRM, $insertSQL) or die(mysqli_error($CiviCRM));
 
             $ContributionID_rsNewMembershipPayment = "-1";
             if (isset($row_rsMembershipPayments['ContributionID'])) {
@@ -145,25 +148,24 @@ AND (YEAR(start_date) = YEAR(%s) OR YEAR(join_date)=YEAR(%s))", GetSQLValueStrin
             if (isset($row_rsMembershipCandidate['id'])) {
                 $MemberID_rsNewMembershipPayment = $row_rsMembershipCandidate['id'];
             }
-            mysql_select_db($database_CiviCRM, $CiviCRM);
-            $query_rsNewMembershipPayment = sprintf("SELECT id, membership_id, contribution_id FROM civicrm_membership_payment WHERE contribution_id= %s AND membership_id = %s ", GetSQLValueString($ContributionID_rsNewMembershipPayment, "int"), GetSQLValueString($MemberID_rsNewMembershipPayment, "int"));
-            $rsNewMembershipPayment = mysql_query($query_rsNewMembershipPayment, $CiviCRM) or die(mysql_error());
-            $row_rsNewMembershipPayment       = mysql_fetch_assoc($rsNewMembershipPayment);
-            $totalRows_rsNewMembershipPayment = mysql_num_rows($rsNewMembershipPayment);
-            
+            $query_rsNewMembershipPayment = sprintf("SELECT id, membership_id, contribution_id FROM civicrm_membership_payment WHERE contribution_id= %s AND membership_id = %s ", GetSQLValueString($CiviCRM,$ContributionID_rsNewMembershipPayment, "int"), GetSQLValueString($CiviCRM,$MemberID_rsNewMembershipPayment, "int"));
+            $rsNewMembershipPayment = mysqli_query($CiviCRM, $query_rsNewMembershipPayment) or die(mysqli_error($CiviCRM));
+            $row_rsNewMembershipPayment       = mysqli_fetch_assoc($rsNewMembershipPayment);
+            $totalRows_rsNewMembershipPayment = mysqli_num_rows($rsNewMembershipPayment);
+
             if ($row_rsNewMembershipPayment['id']) {
-                $log->lwrite("Created link for Memb ID  " . $row_rsMembershipPayments['MembershipID']);
+                $log->lwrite("Created link for contact ID  " . $contactID_rsMembershipCandidate );
             } else {
-                $log->lwrite("Failed to create link for Memb ID  " . $row_rsMembershipPayments['MembershipID']);
+                $log->lwrite("Failed to create link for contact ID  " . $contactID_rsMembershipCandidate);
             }
-            mysql_free_result($rsNewMembershipPayment);
+            mysqli_free_result($rsNewMembershipPayment);
         }
-        mysql_free_result($rsMembershipCandidate);
+        mysqli_free_result($rsMembershipCandidate);
     }
 
-} while ($row_rsMembershipPayments = mysql_fetch_assoc($rsMembershipPayments));
+} while ($row_rsMembershipPayments = mysqli_fetch_assoc($rsMembershipPayments));
 
-mysql_free_result($rsMembershipPayments);
+mysqli_free_result($rsMembershipPayments);
 
 class Logging
 {
